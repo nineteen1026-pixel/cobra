@@ -4072,3 +4072,37 @@ func TestCustomDefaultShellCompDirective(t *testing.T) {
 		})
 	}
 }
+
+// TestGetCompletionsDoesNotMutateCallerArgs verifies that getCompletions does
+// not mutate the backing array of the args slice it receives. The completion
+// logic used to append "--" to a slice that shared its backing array with the
+// caller's args (e.g. os.Args), overwriting an element of that array. Here we
+// pass a slice whose backing array has spare capacity and a distinct trailing
+// sentinel, then assert neither the visible args nor the trailing slot changed.
+func TestGetCompletionsDoesNotMutateCallerArgs(t *testing.T) {
+	rootCmd := &Command{
+		Use:       "root",
+		ValidArgs: []string{"one", "two", "three"},
+		Args:      MinimumNArgs(1),
+	}
+
+	// Build a backing array larger than the slice we hand to getCompletions.
+	// args points at backing[0:2] but backing[2] remains a sentinel that must
+	// never be touched, and backing[1] (the toComplete slot) must survive too.
+	backing := []string{"one", "", "SENTINEL_MUST_NOT_CHANGE"}
+	args := backing[0:2] // len==2, cap==3 — mirrors os.Args having spare capacity
+
+	// Snapshot the backing array so we can detect any mutation.
+	wantBacking := append([]string(nil), backing...)
+
+	_, _, _, err := rootCmd.getCompletions(args)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	for i, want := range wantBacking {
+		if backing[i] != want {
+			t.Errorf("backing array was mutated at index %d: got %q, want %q", i, backing[i], want)
+		}
+	}
+}
